@@ -1,0 +1,3 @@
+negocio_id,nombre,nombre_corto,activo,pais,idioma_plantilla,phone_number_id,telefono_dueno,umbral_dias,umbral_max_dias,cooldown_dias,max_por_dia,dias_habiles,plantilla_reactivacion,plantilla_resumen,plantilla_aviso,link_reserva
+brb001,Barbería El Corte S.A. de C.V.,El Corte,si,MX,es_MX,123456789012345,5215512345678,45,120,60,40,"1,2,3,4,5,6",reactivacion_barberia_v1,resumen_diario_barberia_v1,aviso_cliente_interesado_v1,https://booksy.com/es-mx/el-corte
+brb002,Barbershop Nueve,Nueve,no,MX,es_MX,987654321098765,5215587654321,40,110,45,25,"2,3,4,5,6",reactivacion_barberia_v1,resumen_diario_barberia_v1,aviso_cliente_interesado_v1,https://wa.me/5215587654321

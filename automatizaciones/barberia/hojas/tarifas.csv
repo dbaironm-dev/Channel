@@ -1,0 +1,16 @@
+pais,categoria,precio_usd,nota
+MX,marketing,0.0305,Tarifa marketing verificada 2026. Marketing no baja por volumen.
+MX,utility,0.0050,ESTIMADO. Utility ronda 80-90% menos que marketing y SI baja por escalones de volumen. Sustituir por la tarifa real de Meta.
+MX,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+US,marketing,0.0250,Tarifa marketing verificada 2026.
+US,utility,0.0040,ESTIMADO. Sustituir por la tarifa real de Meta.
+US,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+BR,marketing,0.0625,Tarifa marketing verificada 2026.
+BR,utility,0.0090,ESTIMADO. Sustituir por la tarifa real de Meta.
+BR,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+CO,marketing,0.0200,ESTIMADO. Sustituir por la tarifa real de Meta para Colombia.
+CO,utility,0.0035,ESTIMADO. Sustituir por la tarifa real de Meta para Colombia.
+CO,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+AR,marketing,0.0200,ESTIMADO. Sustituir por la tarifa real de Meta para Argentina.
+AR,utility,0.0035,ESTIMADO. Sustituir por la tarifa real de Meta para Argentina.
+AR,service,0.0000,Gratis dentro de la ventana de 24h de servicio.

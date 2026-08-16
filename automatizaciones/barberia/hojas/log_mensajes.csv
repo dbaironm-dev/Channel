@@ -1,0 +1,3 @@
+timestamp,negocio_id,cliente_id,telefono,tipo,categoria,plantilla,wamid,estado,error_code,error_mensaje,costo_estimado_usd,facturable,respondio,agendo,dias_dormido,diagnostico,accion
+2026-03-10T16:00:12.000Z,brb001,c001,5215511111111,reactivacion,marketing,reactivacion_barberia_v1,wamid.HBgNNTIxNTUxMTExMTExMRUCABEYEjhBM0Y5,entregado,,,0.0305,si,no,no,52,,ninguna
+2026-03-10T16:00:34.000Z,brb001,c004,5215544444444,reactivacion,marketing,reactivacion_barberia_v1,,error,131026,Receiver is incapable of receiving this message,0,,no,no,47,El número no puede recibir mensajes (probablemente no tiene WhatsApp).,descartar_numero

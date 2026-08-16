@@ -1,0 +1,3 @@
+fecha,negocio_id,enviados,errores,simulados,costo_estimado_usd,incidencias,requiere_atencion
+2026-08-14,brb001,12,1,0,0.3660,132001: La plantilla no existe o no está aprobada en ese idioma.,si
+2026-08-15,brb001,9,0,0,0.2745,,no

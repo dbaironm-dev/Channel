@@ -1,0 +1,804 @@
+{
+  "name": "Barbería · 02 Respuestas de WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-barberia",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n123637302",
+      "name": "Verificación de Meta (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        80
+      ],
+      "webhookId": "wa-barberia-verificacion"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "REEMPLAZA_CON_TU_VERIFY_TOKEN",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n766068587",
+      "name": "¿Verify token correcto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "n511747269",
+      "name": "Devolver challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "forbidden",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "n361111713",
+      "name": "Rechazar verificación",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-barberia",
+        "responseMode": "onReceived",
+        "responseCode": 200,
+        "options": {}
+      },
+      "id": "n358059291",
+      "name": "Evento entrante (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        460
+      ],
+      "webhookId": "wa-barberia-entrante"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "sheet_id",
+              "value": "REEMPLAZA_CON_EL_ID_DE_TU_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "graph_version",
+              "value": "v21.0",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n349727260",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -380,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Aplana el sobre que manda Meta. Un solo POST puede traer varios eventos y de\n// dos clases distintas: mensajes entrantes y acuses de entrega (statuses).\n// Devuelve un item por evento, ya etiquetado.\n// ---------------------------------------------------------------------------\nconst eventos = [];\n\nfor (const item of $input.all()) {\n  const cuerpo = item.json.body ?? item.json;\n  for (const entrada of (cuerpo.entry ?? [])) {\n    for (const cambio of (entrada.changes ?? [])) {\n      const v = cambio.value ?? {};\n      const phoneNumberId = v.metadata?.phone_number_id ?? '';\n\n      for (const m of (v.messages ?? [])) {\n        // El nombre del perfil de WhatsApp sirve de respaldo si el cliente\n        // no está en la hoja todavía.\n        const perfil = (v.contacts ?? []).find(c => c.wa_id === m.from);\n        eventos.push({ json: {\n          clase: 'mensaje',\n          phone_number_id: phoneNumberId,\n          from: String(m.from ?? ''),\n          wamid: String(m.id ?? ''),\n          tipo_mensaje: String(m.type ?? ''),\n          // Las quick replies de una plantilla llegan como type=button con payload.\n          payload_boton: m.button?.payload ?? m.interactive?.button_reply?.id ?? '',\n          texto: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? '',\n          nombre_perfil: perfil?.profile?.name ?? '',\n          timestamp: m.timestamp ?? '',\n        }});\n      }\n\n      for (const s of (v.statuses ?? [])) {\n        eventos.push({ json: {\n          clase: 'estado',\n          phone_number_id: phoneNumberId,\n          wamid: String(s.id ?? ''),\n          estado_entrega: String(s.status ?? ''),\n          destinatario: String(s.recipient_id ?? ''),\n          // Aquí viene el dato que de verdad importa para la contabilidad:\n          // si Meta lo facturó y en qué categoría lo clasificó ELLA, que no\n          // siempre coincide con la categoría con la que se envió.\n          facturable: s.pricing?.billable === true ? 'si'\n                    : s.pricing?.billable === false ? 'no' : '',\n          categoria_real: s.pricing?.category ?? '',\n          motivo_error: (s.errors ?? []).map(e => e.code + ': ' + (e.title ?? '')).join(' | '),\n          timestamp: s.timestamp ?? '',\n        }});\n      }\n    }\n  }\n}\n\nconsole.log('eventos=' + JSON.stringify(eventos.map(e => e.json.clase)));\nreturn eventos;"
+      },
+      "id": "n176584579",
+      "name": "Normalizar evento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.clase }}",
+              "rightValue": "mensaje",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n168017821",
+      "name": "¿Es un mensaje?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        60,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "negocios",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "n941448719",
+      "name": "Leer negocios",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        280,
+        340
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "clientes",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "n521759619",
+      "name": "Leer clientes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        500,
+        340
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Decide qué hacer con una respuesta entrante: identifica al cliente, deduce la\n// intención y arma los tres mensajes posibles (respuesta al cliente, aviso al\n// dueño) más la fila de log. Corre una vez por item.\n// ---------------------------------------------------------------------------\nconst ev       = $json;\nconst negocios = $('Leer negocios').all().map(i => i.json);\nconst clientes = $('Leer clientes').all().map(i => i.json);\n\nconst soloDigitos = t => String(t ?? '').replace(/[^0-9]/g, '');\n\n// WhatsApp no siempre devuelve el número tal como se envió. México inserta o\n// quita un \"1\" tras el 52, y Argentina un \"9\" tras el 54. Si comparamos el\n// número crudo, el 100% de las respuestas mexicanas quedan sin identificar.\nfunction variantes(tel) {\n  const d = soloDigitos(tel);\n  const v = new Set([d]);\n  if (d.startsWith('521') && d.length === 13) v.add('52' + d.slice(3));\n  if (d.startsWith('52')  && d.length === 12) v.add('521' + d.slice(2));\n  if (d.startsWith('549') && d.length === 13) v.add('54' + d.slice(3));\n  if (d.startsWith('54')  && d.length === 12) v.add('549' + d.slice(2));\n  return [...v];\n}\n\nconst indice = {};\nfor (const c of clientes) {\n  for (const k of variantes(c.telefono)) {\n    if (k.length >= 10) indice[k] = c;\n  }\n}\n\nlet cliente = null;\nfor (const k of variantes(ev.from)) {\n  if (indice[k]) { cliente = indice[k]; break; }\n}\n\n// Si no está en la hoja, seguimos igualmente: el dueño debe enterarse de que\n// alguien escribió, aunque no sepamos quién es.\nconst negocioId = cliente ? String(cliente.negocio_id).trim() : '';\nconst negocio = negocios.find(n => String(n.negocio_id).trim() === negocioId)\n             || negocios.find(n => String(n.phone_number_id).trim() === String(ev.phone_number_id).trim())\n             || {};\n\nconst nombre = String(cliente?.nombre ?? ev.nombre_perfil ?? '').trim().split(/\\s+/)[0] || 'Hola';\nconst negocioCorto = String(negocio.nombre_corto || negocio.nombre || 'la barbería').trim();\n\n// Intención: primero el payload del botón (determinista), y solo si no hay\n// botón caemos a interpretar texto libre.\nconst normalizar = s => String(s ?? '')\n  .toLowerCase()\n  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n  .replace(/[^a-z0-9\\s]/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst PALABRAS_BAJA = ['baja','stop','cancelar suscripcion','no me escriban','no quiero mensajes','eliminar','desuscribir','unsubscribe'];\nconst PALABRAS_SI   = ['si','sii','claro','va','dale','agendame','agenda','quiero','sale','ok','okay','de una','me interesa','apartame','apartar'];\nconst PALABRAS_NO   = ['no','ahora no','luego','despues','mas adelante','no gracias','todavia no'];\n\nconst texto = normalizar(ev.texto);\nlet intencion;\nif (ev.payload_boton) {\n  intencion = ({ AGENDAR: 'agendar', AHORA_NO: 'ahora_no', BAJA: 'baja' })[ev.payload_boton] ?? 'otro';\n} else if (PALABRAS_BAJA.some(p => texto === p || texto.includes(p))) {\n  intencion = 'baja';\n} else if (PALABRAS_SI.some(p => texto === p || texto.startsWith(p + ' '))) {\n  intencion = 'agendar';\n} else if (PALABRAS_NO.some(p => texto === p || texto.startsWith(p + ' '))) {\n  intencion = 'ahora_no';\n} else {\n  // Texto libre que no encaja: no adivinamos, lo pasa un humano.\n  intencion = 'otro';\n}\n\nconst RESPUESTAS = {\n  baja:     'Listo, no volverás a recibir mensajes nuestros. Si algún día quieres volver, aquí estaremos. 👋',\n  agendar:  '¡Excelente, ' + nombre + '! 🙌 En un momento te escriben de ' + negocioCorto + ' para darte hora.',\n  ahora_no: 'Sin problema, ' + nombre + '. Aquí seguimos cuando lo necesites. ✂️',\n  otro:     'Gracias por escribir, ' + nombre + '. Ya avisamos a ' + negocioCorto + ' y te contactan enseguida.',\n};\n\nconst telefonoCliente = soloDigitos(ev.from);\nconst phoneNumberId = String(ev.phone_number_id || negocio.phone_number_id || '').trim();\n\nconst respuestaCliente = {\n  messaging_product: 'whatsapp',\n  recipient_type: 'individual',\n  to: telefonoCliente,\n  type: 'text',\n  text: { preview_url: false, body: RESPUESTAS[intencion] },\n};\n\n// Al dueño solo lo molestamos cuando hay algo que hacer: un cliente que\n// quiere cita o un mensaje que necesita lectura humana.\nconst avisarDueno = (intencion === 'agendar' || intencion === 'otro')\n  && !!soloDigitos(negocio.telefono_dueno)\n  && !!String(negocio.plantilla_aviso || '').trim();\n\nconst avisoDueno = avisarDueno ? {\n  messaging_product: 'whatsapp',\n  recipient_type: 'individual',\n  to: soloDigitos(negocio.telefono_dueno),\n  type: 'template',\n  template: {\n    name: String(negocio.plantilla_aviso).trim(),\n    language: { code: String(negocio.idioma_plantilla || 'es_MX').trim() },\n    components: [{ type: 'body', parameters: [\n      { type: 'text', text: negocioCorto },\n      { type: 'text', text: String(cliente?.nombre ?? ev.nombre_perfil ?? 'Un cliente').trim() },\n      { type: 'text', text: telefonoCliente },\n    ]}],\n  },\n} : null;\n\nreturn { json: {\n  intencion,\n  encontrado: !!cliente,\n  cliente_id: cliente ? String(cliente.cliente_id).trim() : '',\n  negocio_id: negocioId,\n  telefono: telefonoCliente,\n  phone_number_id: phoneNumberId,\n  // Solo tocamos la ficha del cliente si lo identificamos.\n  actualizar_cliente: !!cliente,\n  nuevo_optout: intencion === 'baja' ? 'si' : String(cliente?.optout ?? 'no'),\n  nuevo_estado: intencion === 'baja' ? 'baja'\n              : intencion === 'agendar' ? 'interesado'\n              : intencion === 'ahora_no' ? 'contactado'\n              : 'respondio',\n  respuesta_cliente: respuestaCliente,\n  avisar_dueno: avisarDueno,\n  aviso_dueno: avisoDueno,\n  fila_log: {\n    timestamp: new Date().toISOString(),\n    negocio_id: negocioId,\n    cliente_id: cliente ? String(cliente.cliente_id).trim() : '',\n    telefono: telefonoCliente,\n    tipo: 'respuesta',\n    categoria: 'service',\n    plantilla: '',\n    wamid: ev.wamid,\n    estado: 'recibido',\n    error_code: '',\n    error_mensaje: '',\n    // Responder dentro de la ventana de 24h no cuesta nada.\n    costo_estimado_usd: 0,\n    facturable: 'no',\n    respondio: 'si',\n    agendo: intencion === 'agendar' ? 'si' : 'no',\n    dias_dormido: '',\n    diagnostico: 'intencion=' + intencion + (cliente ? '' : ' (número no identificado en la hoja de clientes)'),\n    accion: cliente ? 'ninguna' : 'avisar_operador',\n  },\n}};"
+      },
+      "id": "n73385785",
+      "name": "Interpretar respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.actualizar_cliente }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n441501033",
+      "name": "¿Cliente identificado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "clientes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cliente_id": "={{ $json.cliente_id }}",
+            "optout": "={{ $json.nuevo_optout }}",
+            "estado": "={{ $json.nuevo_estado }}"
+          },
+          "matchingColumns": [
+            "cliente_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "n802679383",
+      "name": "Actualizar ficha",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        260
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.graph_version }}/{{ $json.phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Interpretar respuesta').item.json.respuesta_cliente) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "n143222347",
+      "name": "Responder al cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Interpretar respuesta').item.json.avisar_dueno }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n650488036",
+      "name": "¿Avisar al dueño?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1600,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.graph_version }}/{{ $('Interpretar respuesta').item.json.phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Interpretar respuesta').item.json.aviso_dueno) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "n946244408",
+      "name": "Avisar al dueño",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "log_mensajes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "n81239704",
+      "name": "Registrar respuesta",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2040,
+        340
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($('Interpretar respuesta').item.json.fila_log) }}",
+        "options": {}
+      },
+      "id": "n974861124",
+      "name": "Fila de log",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1820,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.clase }}",
+              "rightValue": "estado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n281170598",
+      "name": "¿Es un acuse?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        280,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Acuse de entrega. Aquí llega el único dato de costo que no es una estimación:\n// Meta dice si el mensaje fue facturable y en qué categoría lo clasificó.\n// Se escribe sobre la fila del log que tenga ese wamid.\n// ---------------------------------------------------------------------------\nconst ev = $json;\n\n// sent -> delivered -> read. No degradamos un estado ya avanzado.\nconst RANGO = { enviado: 1, sent: 1, entregado: 2, delivered: 2, leido: 3, read: 3, failed: 0, fallido: 0 };\nconst ES = { sent: 'enviado', delivered: 'entregado', read: 'leido', failed: 'fallido', deleted: 'borrado' };\n\nconst estado = ES[ev.estado_entrega] ?? ev.estado_entrega;\n\nreturn { json: {\n  wamid: ev.wamid,\n  estado,\n  facturable: ev.facturable,\n  categoria: ev.categoria_real || '',\n  error_mensaje: ev.motivo_error || '',\n  // Un fallo en la entrega es lo que hay que mirar: el envío se aceptó pero\n  // el mensaje nunca llegó, y eso no aparece en el log del workflow 01.\n  accion: estado === 'fallido' ? 'avisar_operador' : 'ninguna',\n  rango: RANGO[ev.estado_entrega] ?? 0,\n}};"
+      },
+      "id": "n452812841",
+      "name": "Interpretar acuse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "log_mensajes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "wamid": "={{ $json.wamid }}",
+            "estado": "={{ $json.estado }}",
+            "facturable": "={{ $json.facturable }}",
+            "categoria": "={{ $json.categoria }}",
+            "accion": "={{ $json.accion }}"
+          },
+          "matchingColumns": [
+            "wamid"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "n848803893",
+      "name": "Actualizar costo real",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        580
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "n259373208",
+      "name": "Evento ignorado",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        500,
+        760
+      ]
+    }
+  ],
+  "connections": {
+    "Verificación de Meta (GET)": {
+      "main": [
+        [
+          {
+            "node": "¿Verify token correcto?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Verify token correcto?": {
+      "main": [
+        [
+          {
+            "node": "Devolver challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rechazar verificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evento entrante (POST)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalizar evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar evento": {
+      "main": [
+        [
+          {
+            "node": "¿Es un mensaje?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es un mensaje?": {
+      "main": [
+        [
+          {
+            "node": "Leer negocios",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es un acuse?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer negocios": {
+      "main": [
+        [
+          {
+            "node": "Leer clientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer clientes": {
+      "main": [
+        [
+          {
+            "node": "Interpretar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar respuesta": {
+      "main": [
+        [
+          {
+            "node": "¿Cliente identificado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Cliente identificado?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar ficha",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar ficha": {
+      "main": [
+        [
+          {
+            "node": "Responder al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder al cliente": {
+      "main": [
+        [
+          {
+            "node": "¿Avisar al dueño?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Avisar al dueño?": {
+      "main": [
+        [
+          {
+            "node": "Avisar al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fila de log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar al dueño": {
+      "main": [
+        [
+          {
+            "node": "Fila de log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fila de log": {
+      "main": [
+        [
+          {
+            "node": "Registrar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es un acuse?": {
+      "main": [
+        [
+          {
+            "node": "Interpretar acuse",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Evento ignorado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar acuse": {
+      "main": [
+        [
+          {
+            "node": "Actualizar costo real",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "America/Mexico_City"
+  },
+  "pinData": {},
+  "tags": []
+}

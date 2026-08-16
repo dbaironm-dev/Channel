@@ -1,0 +1,5 @@
+negocio_id,cliente_id,nombre,telefono,ultima_visita,servicio_habitual,barbero_preferido,proxima_cita,optout,ultimo_contacto,estado,visitas_totales,ticket_promedio
+brb001,c001,Juan Pérez,5215511111111,2026-06-20,Corte y barba,Memo,,no,,dormido,7,350
+brb001,c002,Luis Ramírez,5215522222222,2026-08-02,Corte clásico,Memo,2026-08-30,no,,activo,12,280
+brb001,c003,Andrés Solís,5215533333333,2026-05-10,Corte y barba,Chuy,,si,2026-06-15,perdido,3,350
+brb001,c004,Diego Nava,5215544444444,2026-06-28,Fade,Chuy,,no,,dormido,5,300
