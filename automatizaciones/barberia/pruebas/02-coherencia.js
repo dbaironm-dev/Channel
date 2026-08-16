@@ -1,6 +1,6 @@
 // Comprobaciones cruzadas entre workflows, hojas y documentación.
 const fs = require('fs');
-const RAIZ = '/home/user/Channel/automatizaciones/barberia';
+const RAIZ = __dirname + '/..';
 
 let fallos = 0;
 const check = (n, c, d = '') => { console.log(`${c ? '  ok  ' : '  FAIL'} ${n}${d ? ' -> ' + d : ''}`); if (!c) fallos++; };
