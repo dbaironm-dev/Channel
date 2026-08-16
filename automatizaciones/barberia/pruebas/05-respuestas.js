@@ -1,9 +1,9 @@
-// Prueba los nodos del workflow 02 con sobres reales de la Cloud API.
+// Prueba el workflow 02 con sobres reales de Twilio y de la WhatsApp Cloud API.
 const fs = require('fs');
 const vm = require('vm');
 
-const RAIZ = '/home/user/Channel/automatizaciones/barberia';
-const wf = JSON.parse(fs.readFileSync(RAIZ + '/workflows/02-respuestas-whatsapp.json', 'utf8'));
+const RAIZ = __dirname + '/..';
+const wf = JSON.parse(fs.readFileSync(RAIZ + '/workflows/02-respuestas-entrantes.json', 'utf8'));
 const codigo = n => wf.nodes.find(x => x.name === n).parameters.jsCode;
 
 function leerCsv(ruta) {
@@ -24,123 +24,157 @@ function leerCsv(ruta) {
 
 const NEGOCIOS = leerCsv(RAIZ + '/hojas/negocios.csv');
 const CLIENTES = leerCsv(RAIZ + '/hojas/clientes.csv');
+const BASE = { JSON, Date, Number, String, Math, Object, Array, Set, isNaN, RegExp, encodeURIComponent };
 
-const BASE = { JSON, Date, Number, String, Math, Object, Array, Set, isNaN, RegExp };
+const normalizar = sobre => vm.runInContext('(function(){' + codigo('Normalizar evento') + '})()',
+  vm.createContext({ ...BASE, $input: { all: () => [{ json: sobre }] }, console: { log() {} } })).map(i => i.json);
 
-function normalizar(sobre) {
-  const ctx = vm.createContext({ ...BASE, $input: { all: () => [{ json: sobre }] }, console: { log() {} } });
-  return vm.runInContext('(function(){' + codigo('Normalizar evento') + '})()', ctx).map(i => i.json);
-}
+const interpretar = ev => vm.runInContext('(function(){' + codigo('Interpretar respuesta') + '})()',
+  vm.createContext({ ...BASE, $json: ev, console: { log() {} },
+    $: n => ({ all: () => (n === 'Leer negocios' ? NEGOCIOS : CLIENTES).map(json => ({ json })) }) })).json;
 
-function interpretar(ev) {
-  const $ = n => ({ all: () => (n === 'Leer negocios' ? NEGOCIOS : CLIENTES).map(json => ({ json })) });
-  const ctx = vm.createContext({ ...BASE, $, $json: ev, console: { log() {} } });
-  return vm.runInContext('(function(){' + codigo('Interpretar respuesta') + '})()', ctx).json;
-}
+const acuse = ev => vm.runInContext('(function(){' + codigo('Interpretar acuse') + '})()',
+  vm.createContext({ ...BASE, $json: ev, console: { log() {} } })).json;
 
-function acuse(ev) {
-  const ctx = vm.createContext({ ...BASE, $json: ev, console: { log() {} } });
-  return vm.runInContext('(function(){' + codigo('Interpretar acuse') + '})()', ctx).json;
-}
-
-// Sobre tal como lo manda Meta.
-const sobre = (value) => ({ object: 'whatsapp_business_account', entry: [{ id: '102...', changes: [{ field: 'messages', value }] }] });
-const meta = { messaging_product: 'whatsapp', metadata: { display_phone_number: '5215512345678', phone_number_id: '123456789012345' } };
-const msg = (m, waId = '525511111111', nombre = 'Juan Pérez') => sobre({
-  ...meta, contacts: [{ profile: { name: nombre }, wa_id: waId }], messages: [{ from: waId, id: 'wamid.IN1', timestamp: '1755350000', ...m }],
+// --- Sobres reales ----------------------------------------------------------
+const twSms = (body, from = '+12145550001') => ({
+  MessageSid: 'SM1111', SmsSid: 'SM1111', AccountSid: 'AC000',
+  MessagingServiceSid: 'MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+  From: from, To: '+12145559000', Body: body, NumMedia: '0', FromState: 'TX',
 });
+const twEstado = (status, extra = {}) => ({
+  MessageSid: 'SM2222', SmsSid: 'SM2222', MessageStatus: status, SmsStatus: status,
+  To: '+12145550001', ...extra,
+});
+const waSobre = v => ({ object: 'whatsapp_business_account', entry: [{ id: '1', changes: [{ field: 'messages', value: v }] }] });
+const waMeta = { messaging_product: 'whatsapp', metadata: { display_phone_number: '5215512345678', phone_number_id: '123456789012345' } };
+const waMsg = (m, waId = '525511111111') => waSobre({
+  ...waMeta, contacts: [{ profile: { name: 'Carlos Mendez' }, wa_id: waId }],
+  messages: [{ from: waId, id: 'wamid.IN1', timestamp: '1755350000', ...m }],
+});
+
+// GSM-7: lo que NO esté aquí fuerza UCS-2 y multiplica el costo del SMS.
+const GSM7 = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡'
+  + 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà^{}\\[~]|€';
+const esGsm7 = t => [...String(t)].every(c => GSM7.includes(c));
 
 let fallos = 0;
 const check = (n, c, d = '') => { console.log(`${c ? '  ok  ' : '  FAIL'} ${n}${d ? ' -> ' + d : ''}`); if (!c) fallos++; };
 
-console.log('\n--- Normalización del sobre de Meta ---');
-const evs = normalizar(msg({ type: 'button', button: { payload: 'AGENDAR', text: 'Sí, agéndame' } }));
-check('un evento', evs.length === 1);
-check('clase mensaje', evs[0].clase === 'mensaje');
-check('extrae el payload del botón', evs[0].payload_boton === 'AGENDAR', evs[0].payload_boton);
-check('extrae phone_number_id', evs[0].phone_number_id === '123456789012345');
-check('extrae nombre de perfil', evs[0].nombre_perfil === 'Juan Pérez');
+console.log('\n--- Normalización: Twilio ---');
+const evSms = normalizar(twSms('YES'));
+check('un evento', evSms.length === 1);
+check('clase mensaje', evSms[0].clase === 'mensaje');
+check('canal sms', evSms[0].canal === 'sms');
+check('extrae el texto', evSms[0].texto === 'YES');
+check('extrae el remitente', evSms[0].from === '+12145550001');
+check('guarda el numero del negocio', evSms[0].remitente_negocio === '+12145559000');
+check('guarda el Messaging Service', evSms[0].remitente_servicio.startsWith('MG'));
+check('SMS no tiene payload de boton', evSms[0].payload_boton === '');
 
-const mixto = normalizar(sobre({ ...meta,
+const evEst = normalizar(twEstado('delivered'));
+check('el callback de estado se detecta como acuse', evEst[0].clase === 'estado', evEst[0].clase);
+check('no lo confunde con un mensaje', evEst[0].estado_entrega === 'delivered');
+
+console.log('\n--- Normalización: Meta (sigue funcionando) ---');
+const evWa = normalizar(waMsg({ type: 'button', button: { payload: 'AGENDAR', text: 'Si' } }));
+check('canal whatsapp', evWa[0].canal === 'whatsapp');
+check('extrae el payload del boton', evWa[0].payload_boton === 'AGENDAR');
+const mixto = normalizar(waSobre({ ...waMeta,
   contacts: [{ profile: { name: 'A' }, wa_id: '525511111111' }],
   messages: [{ from: '525511111111', id: 'wamid.A', type: 'text', text: { body: 'hola' } }],
-  statuses: [{ id: 'wamid.B', status: 'delivered', recipient_id: '525511111111', pricing: { billable: true, category: 'marketing' } }],
-}));
-check('separa mensajes y acuses en el mismo POST',
-  mixto.length === 2 && mixto[0].clase === 'mensaje' && mixto[1].clase === 'estado',
-  JSON.stringify(mixto.map(e => e.clase)));
-check('sobre vacío no revienta', normalizar({ object: 'x' }).length === 0);
+  statuses: [{ id: 'wamid.B', status: 'delivered', pricing: { billable: true, category: 'marketing' } }] }));
+check('separa mensajes y acuses del mismo POST', mixto.length === 2);
+check('sobre vacio no revienta', normalizar({ object: 'x' }).length === 0);
 
-console.log('\n--- El problema del 52 vs 521 en México ---');
-// La hoja guarda 5215511111111; Meta responde desde 525511111111.
-const ident = interpretar(normalizar(msg({ type: 'button', button: { payload: 'AGENDAR', text: 'Sí' } }, '525511111111'))[0]);
-check('identifica al cliente pese al 1 faltante', ident.encontrado === true);
-check('cliente correcto', ident.cliente_id === 'c001', ident.cliente_id);
-check('negocio resuelto', ident.negocio_id === 'brb001', ident.negocio_id);
+console.log('\n--- Numeros de EE.UU. con y sin el 1 ---');
+// La hoja guarda 12145550001; el operador puede devolver 2145550001.
+const sinUno = interpretar(normalizar(twSms('YES', '+12145550001'))[0]);
+check('identifica con el 1', sinUno.cliente_id === 'c001', sinUno.cliente_id);
+const conDiez = interpretar(normalizar(twSms('YES', '2145550001'))[0]);
+check('identifica sin el 1', conDiez.cliente_id === 'c001', conDiez.cliente_id);
+const mx = interpretar(normalizar(waMsg({ type: 'text', text: { body: 'si' } }, '525511111111'))[0]);
+check('sigue resolviendo el 52/521 de Mexico', mx.cliente_id === 'c101', mx.cliente_id);
 
-const identInv = interpretar(normalizar(msg({ type: 'text', text: { body: 'si' } }, '5215511111111'))[0]);
-check('identifica también con el formato original', identInv.cliente_id === 'c001', identInv.cliente_id);
-
-console.log('\n--- Intenciones por botón ---');
-for (const [payload, esperada] of [['AGENDAR', 'agendar'], ['AHORA_NO', 'ahora_no'], ['BAJA', 'baja']]) {
-  const r = interpretar(normalizar(msg({ type: 'button', button: { payload, text: 'x' } }))[0]);
-  check(`botón ${payload} -> ${esperada}`, r.intencion === esperada, r.intencion);
+console.log('\n--- Opt-out: lo que Twilio NO intercepta ---');
+// Twilio se queda con STOP, END, QUIT, CANCEL y UNSUBSCRIBE. El resto llega
+// aquí, y desde abril de 2025 hay que honrarlo igual.
+const intencionSms = t => interpretar(normalizar(twSms(t))[0]).intencion;
+for (const frase of ['please take me off your list', 'stop texting me', 'do not text me again',
+                     'ya no me manden mensajes', 'quitame de la lista', 'leave me alone']) {
+  check(`"${frase}" -> baja`, intencionSms(frase) === 'baja', intencionSms(frase));
 }
 
-console.log('\n--- Intenciones por texto libre ---');
-const porTexto = t => interpretar(normalizar(msg({ type: 'text', text: { body: t } }))[0]).intencion;
-check('"Sí" con acento y mayúscula -> agendar', porTexto('Sí') === 'agendar', porTexto('Sí'));
-check('"BAJA" -> baja', porTexto('BAJA') === 'baja', porTexto('BAJA'));
-check('"ya no quiero mensajes" -> baja', porTexto('ya no quiero mensajes') === 'baja', porTexto('ya no quiero mensajes'));
-check('"dale, apártame" -> agendar', porTexto('dale, apártame') === 'agendar', porTexto('dale, apártame'));
-check('"ahora no gracias" -> ahora_no', porTexto('ahora no gracias') === 'ahora_no', porTexto('ahora no gracias'));
-check('"cuánto cuesta el fade?" -> otro (lo ve un humano)', porTexto('cuánto cuesta el fade?') === 'otro', porTexto('cuánto cuesta el fade?'));
+console.log('\n--- Intenciones ---');
+for (const [t, esperada] of [['YES', 'agendar'], ['yes please', 'agendar'], ['Si', 'agendar'],
+                             ['sounds good', 'agendar'], ['not now', 'ahora_no'], ['no thanks', 'ahora_no'],
+                             ['how much for a fade?', 'otro'], ['what time do you open', 'otro']]) {
+  check(`"${t}" -> ${esperada}`, intencionSms(t) === esperada, intencionSms(t));
+}
 
-console.log('\n--- Efectos de cada intención ---');
-const baja = interpretar(normalizar(msg({ type: 'button', button: { payload: 'BAJA', text: 'x' } }))[0]);
-check('baja marca optout=si', baja.nuevo_optout === 'si', baja.nuevo_optout);
-check('baja NO molesta al dueño', baja.avisar_dueno === false);
-check('baja confirma al cliente', baja.respuesta_cliente.text.body.includes('no volverás a recibir'));
-check('baja no se cobra', baja.fila_log.costo_estimado_usd === 0);
+console.log('\n--- Respuesta por SMS ---');
+const ag = interpretar(normalizar(twSms('YES'))[0]);
+check('marca canal sms', ag.es_sms === true);
+check('arma formulario, no payload', ag.respuesta_form.length > 0 && ag.respuesta_payload === null);
+check('responde al cliente correcto', ag.respuesta_form.includes('To=%2B12145550001'));
+check('usa el Messaging Service', ag.respuesta_form.includes('MessagingServiceSid=MG'));
 
-const agendar = interpretar(normalizar(msg({ type: 'button', button: { payload: 'AGENDAR', text: 'x' } }))[0]);
-check('agendar avisa al dueño', agendar.avisar_dueno === true);
-check('aviso va al teléfono del dueño', agendar.aviso_dueno.to === '5215512345678', agendar.aviso_dueno.to);
-check('aviso usa plantilla utility', agendar.aviso_dueno.template.name === 'aviso_cliente_interesado_v1');
-check('aviso lleva 3 parámetros', agendar.aviso_dueno.template.components[0].parameters.length === 3);
-check('el teléfono del cliente va en el aviso',
-  agendar.aviso_dueno.template.components[0].parameters[2].text === '525511111111');
-check('marca agendo=si en el log', agendar.fila_log.agendo === 'si');
-check('estado del cliente = interesado', agendar.nuevo_estado === 'interesado');
+const cuerpo = decodeURIComponent((ag.respuesta_form.match(/Body=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
+console.log('  respuesta: "' + cuerpo + '"');
+check('la respuesta cabe en GSM-7 (no triplica el costo)', esGsm7(cuerpo), cuerpo);
+for (const i of ['baja', 'ahora_no', 'otro']) {
+  const r = interpretar(normalizar(twSms({ baja: 'take me off', ahora_no: 'not now', otro: 'que precio?' }[i]))[0]);
+  const b = decodeURIComponent((r.respuesta_form.match(/Body=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
+  check(`respuesta de "${i}" en GSM-7`, esGsm7(b), b);
+}
 
-const ahoraNo = interpretar(normalizar(msg({ type: 'button', button: { payload: 'AHORA_NO', text: 'x' } }))[0]);
-check('ahora_no NO molesta al dueño', ahoraNo.avisar_dueno === false);
-check('ahora_no mantiene optout=no', ahoraNo.nuevo_optout === 'no', ahoraNo.nuevo_optout);
+console.log('\n--- Aviso al dueño ---');
+check('agendar avisa al dueño', ag.avisar_dueno === true);
+check('el aviso va al dueño', ag.aviso_form.includes('To=%2B12145551234'), ag.aviso_form.slice(0, 40));
+const avisoCuerpo = decodeURIComponent((ag.aviso_form.match(/Body=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
+console.log('  aviso: "' + avisoCuerpo + '"');
+check('el aviso lleva el telefono del cliente', avisoCuerpo.includes('12145550001'));
+check('el aviso lleva el nombre', avisoCuerpo.includes('Juan Perez'));
+check('el aviso no deja marcadores', !/\{[a-z_]+\}/.test(avisoCuerpo), avisoCuerpo);
+check('el aviso cabe en GSM-7', esGsm7(avisoCuerpo));
 
-console.log('\n--- Número desconocido ---');
-const desconocido = interpretar(normalizar(msg({ type: 'text', text: { body: 'hola' } }, '525599998888', 'Ana'))[0]);
-check('no revienta', !!desconocido);
-check('marca que no lo identificó', desconocido.encontrado === false);
-check('no intenta actualizar una ficha inexistente', desconocido.actualizar_cliente === false);
-check('resuelve el negocio por phone_number_id', desconocido.negocio_id === '' && desconocido.aviso_dueno !== null);
-check('usa el nombre del perfil de WhatsApp', desconocido.respuesta_cliente.text.body.includes('Ana'));
-check('escala al operador', desconocido.fila_log.accion === 'avisar_operador');
+const bajaSms = interpretar(normalizar(twSms('take me off your list'))[0]);
+check('baja marca optout=si', bajaSms.nuevo_optout === 'si');
+check('baja NO molesta al dueño', bajaSms.avisar_dueno === false);
+const noSms = interpretar(normalizar(twSms('not now'))[0]);
+check('ahora_no NO molesta al dueño', noSms.avisar_dueno === false);
+
+console.log('\n--- WhatsApp sigue intacto ---');
+const waAg = interpretar(normalizar(waMsg({ type: 'button', button: { payload: 'AGENDAR', text: 'Si' } }))[0]);
+check('canal whatsapp', waAg.es_sms === false);
+check('arma payload, no formulario', waAg.respuesta_payload?.type === 'text' && waAg.respuesta_form === '');
+check('aviso por plantilla utility', waAg.aviso_payload?.template?.name === 'aviso_cliente_interesado_v1');
+check('responder en ventana de 24h es gratis', waAg.fila_log.costo_estimado_usd === 0);
+check('el SMS entrante SI se cobra', ag.fila_log.costo_estimado_usd === 0.0079, String(ag.fila_log.costo_estimado_usd));
+
+console.log('\n--- Numero desconocido ---');
+const desc = interpretar(normalizar(twSms('hello', '+19995551111'))[0]);
+check('no revienta', !!desc);
+check('marca que no lo identifico', desc.encontrado === false);
+check('no intenta actualizar una ficha inexistente', desc.actualizar_cliente === false);
+check('resuelve el negocio por el numero remitente', desc.negocio_id === '' && desc.aviso_form !== '');
+check('escala al operador', desc.fila_log.accion === 'avisar_operador');
 
 console.log('\n--- Acuses de entrega ---');
-const ent = acuse(normalizar(sobre({ ...meta, statuses: [{ id: 'wamid.B', status: 'delivered', recipient_id: '52...', pricing: { billable: true, pricing_model: 'PMP', category: 'marketing' } }] }))[0]);
-check('traduce delivered -> entregado', ent.estado === 'entregado', ent.estado);
-check('captura facturable de Meta', ent.facturable === 'si', ent.facturable);
-check('captura la categoría real', ent.categoria === 'marketing', ent.categoria);
-
-const fallo = acuse(normalizar(sobre({ ...meta, statuses: [{ id: 'wamid.C', status: 'failed', errors: [{ code: 131049, title: 'Unable to deliver' }], pricing: { billable: false } }] }))[0]);
-check('failed -> fallido', fallo.estado === 'fallido', fallo.estado);
-check('failed escala al operador', fallo.accion === 'avisar_operador');
-check('failed no es facturable', fallo.facturable === 'no', fallo.facturable);
-check('guarda el motivo', fallo.error_mensaje.includes('131049'), fallo.error_mensaje);
+const ent = acuse(normalizar(twEstado('delivered'))[0]);
+check('delivered -> entregado', ent.estado === 'entregado', ent.estado);
+check('lo marca facturable', ent.facturable === 'si', ent.facturable);
+const undel = acuse(normalizar(twEstado('undelivered', { ErrorCode: '30007', ErrorMessage: 'Message filtered' }))[0]);
+check('undelivered -> no_entregado', undel.estado === 'no_entregado', undel.estado);
+check('escala al operador', undel.accion === 'avisar_operador');
+check('guarda el motivo', undel.error_mensaje.includes('30007'), undel.error_mensaje);
+const waEnt = acuse(normalizar(waSobre({ ...waMeta, statuses: [{ id: 'wamid.B', status: 'delivered',
+  pricing: { billable: true, category: 'marketing' } }] }))[0]);
+check('Meta sigue reportando categoria real', waEnt.categoria === 'marketing', waEnt.categoria);
 
 console.log('\n--- Forma de la fila de log ---');
 const COLS = fs.readFileSync(RAIZ + '/hojas/log_mensajes.csv', 'utf8').split('\n')[0].trim().split(',');
-const claves = Object.keys(agendar.fila_log);
+const claves = Object.keys(ag.fila_log);
 check('coincide con las columnas de la hoja',
   JSON.stringify(claves.slice().sort()) === JSON.stringify(COLS.slice().sort()),
   'sobran: ' + claves.filter(k => !COLS.includes(k)) + ' | faltan: ' + COLS.filter(k => !claves.includes(k)));

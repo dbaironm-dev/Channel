@@ -1,5 +1,7 @@
-negocio_id,cliente_id,nombre,telefono,ultima_visita,servicio_habitual,barbero_preferido,proxima_cita,optout,ultimo_contacto,estado,visitas_totales,ticket_promedio
-brb001,c001,Juan Pérez,5215511111111,2026-06-20,Corte y barba,Memo,,no,,dormido,7,350
-brb001,c002,Luis Ramírez,5215522222222,2026-08-02,Corte clásico,Memo,2026-08-30,no,,activo,12,280
-brb001,c003,Andrés Solís,5215533333333,2026-05-10,Corte y barba,Chuy,,si,2026-06-15,perdido,3,350
-brb001,c004,Diego Nava,5215544444444,2026-06-28,Fade,Chuy,,no,,dormido,5,300
+negocio_id,cliente_id,nombre,telefono,ultima_visita,servicio_habitual,barbero_preferido,proxima_cita,consentimiento,fecha_consentimiento,origen_consentimiento,optout,ultimo_contacto,estado,visitas_totales,ticket_promedio
+brb001,c001,Juan Perez,12145550001,2026-06-20,corte y barba,Memo,,si,2026-01-14,formulario en local,no,,dormido,7,35
+brb001,c002,Luis Ramirez,12145550002,2026-08-02,corte clasico,Memo,2026-08-30,si,2025-11-02,formulario en local,no,,activo,12,28
+brb001,c003,Andres Solis,12145550003,2026-05-10,corte y barba,Chuy,,si,2025-09-19,reserva online,si,2026-06-15,baja,3,35
+brb001,c004,Diego Nava,12145550004,2026-06-28,fade,Chuy,,si,2026-02-08,reserva online,no,,dormido,5,30
+brb001,c005,Mark Whitfield,12145550005,2026-06-24,fade,Memo,,no,,,no,,dormido,2,30
+brb002,c101,Carlos Mendez,5215511111111,2026-06-20,corte y barba,Beto,,si,2026-01-20,formulario en local,no,,dormido,9,350

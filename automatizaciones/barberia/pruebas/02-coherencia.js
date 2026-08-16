@@ -68,6 +68,50 @@ for (const p of ['AGENDAR', 'AHORA_NO', 'BAJA']) {
   check(`${p}: está en la doc de plantillas`, doc.includes(p));
 }
 
+console.log('\n--- Canal y plantillas SMS ---');
+const negociosFilas = fs.readFileSync(RAIZ + '/hojas/negocios.csv', 'utf8').trim().split('\n');
+const cabN = negociosFilas[0].split(',');
+const col = (fila, nombre) => {
+  // Parser de una fila con comillas, suficiente para leer una columna.
+  const out = []; let campo = '', q = false;
+  for (let i = 0; i < fila.length; i++) {
+    const c = fila[i];
+    if (q) { if (c === '"' && fila[i+1] === '"') { campo += '"'; i++; } else if (c === '"') q = false; else campo += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { out.push(campo); campo = ''; }
+    else campo += c;
+  }
+  out.push(campo);
+  return out[cabN.indexOf(nombre)] ?? '';
+};
+
+// GSM-7: un solo carácter fuera de este set convierte el SMS entero a UCS-2
+// y la capacidad cae de 160 a 70 caracteres, es decir, triplica la factura.
+const GSM7 = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡'
+  + 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà^{}\\[~]|€';
+const MARCADORES = ['nombre', 'negocio', 'servicio', 'nombre_completo', 'telefono', 'enviados'];
+
+for (const fila of negociosFilas.slice(1)) {
+  const id = col(fila, 'negocio_id');
+  const canal = col(fila, 'canal');
+  check(`${id}: canal válido`, ['sms', 'whatsapp'].includes(canal), canal);
+  if (canal !== 'sms') continue;
+
+  check(`${id}: tiene remitente SMS`, col(fila, 'sms_remitente').trim().length > 0);
+  for (const campo of ['sms_plantilla', 'sms_aviso', 'sms_resumen']) {
+    const txt = col(fila, campo);
+    check(`${id}: ${campo} no está vacía`, txt.trim().length > 0);
+    const malos = [...txt].filter(c => !GSM7.includes(c) && c !== '{' && c !== '}');
+    check(`${id}: ${campo} cabe en GSM-7`, malos.length === 0,
+      malos.length ? 'fuera de GSM-7: ' + [...new Set(malos)].join(' ') + ' (triplica el costo)' : '');
+    const usados = [...txt.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
+    const desconocidos = usados.filter(u => !MARCADORES.includes(u));
+    check(`${id}: ${campo} solo usa marcadores conocidos`, desconocidos.length === 0, desconocidos.join());
+  }
+  check(`${id}: sms_plantilla indica cómo salir`, /STOP/i.test(col(fila, 'sms_plantilla')));
+  check(`${id}: tiene zona horaria`, col(fila, 'zona_horaria').includes('/'), col(fila, 'zona_horaria'));
+}
+
 console.log('\n--- Marcadores por reemplazar (deben existir, son intencionales) ---');
 for (const { f, wf } of wfs) {
   const txt = JSON.stringify(wf);
