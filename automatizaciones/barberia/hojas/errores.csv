@@ -1,0 +1,2 @@
+timestamp,workflow,nodo,ejecucion_id,mensaje,url_ejecucion
+2026-08-15T16:03:41.000Z,Barbería · 01 Reactivación de dormidos,Registrar en log,10482,The service is receiving too many requests from you,https://tu-n8n.example.com/workflow/abc/executions/10482

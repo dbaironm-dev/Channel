@@ -1,0 +1,12 @@
+pais,canal,categoria,precio_usd,nota
+US,sms,segmento,0.0109,"SMS saliente por SEGMENTO: $0.0079 Twilio + ~$0.003 recargo A2P de operador. Se multiplica por el numero de segmentos, que depende del texto."
+US,sms,entrante,0.0079,Un SMS entrante tambien se cobra. Las respuestas de los clientes cuestan.
+MX,whatsapp,marketing,0.0305,Tarifa marketing verificada 2026. Marketing no baja por volumen.
+MX,whatsapp,utility,0.0050,ESTIMADO. Utility ronda 80-90% menos que marketing y SI baja por escalones. Sustituir por la tarifa real de Meta.
+MX,whatsapp,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+US,whatsapp,marketing,0.0250,Tarifa marketing verificada 2026. Solo aplica si el negocio usa canal whatsapp.
+US,whatsapp,utility,0.0040,ESTIMADO. Sustituir por la tarifa real de Meta.
+US,whatsapp,service,0.0000,Gratis dentro de la ventana de 24h de servicio.
+BR,whatsapp,marketing,0.0625,Tarifa marketing verificada 2026.
+CO,whatsapp,marketing,0.0200,ESTIMADO. Sustituir por la tarifa real de Meta para Colombia.
+AR,whatsapp,marketing,0.0200,ESTIMADO. Sustituir por la tarifa real de Meta para Argentina.

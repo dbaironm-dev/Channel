@@ -1,0 +1,1049 @@
+{
+  "name": "Barbería · 01 Reactivación de dormidos",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 10,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "w193209502",
+      "name": "Cron diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "sheet_id",
+              "value": "REEMPLAZA_CON_EL_ID_DE_TU_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "twilio_account_sid",
+              "value": "REEMPLAZA_CON_TU_ACCOUNT_SID",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "graph_version",
+              "value": "v21.0",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "modo_prueba",
+              "value": "si",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "tam_lote",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "a6",
+              "name": "espera_entre_lotes_seg",
+              "value": 20,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "w121154388",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "negocios",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "w14614288",
+      "name": "Leer negocios",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -180,
+        400
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "clientes",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "w191454991",
+      "name": "Leer clientes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        40,
+        400
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "log_mensajes",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "w144570341",
+      "name": "Leer log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        400
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "tarifas",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "w177569067",
+      "name": "Leer tarifas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        400
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Selecciona qué clientes dormidos reciben hoy el mensaje de reactivación.\n// Corre una vez por ejecución y devuelve un item por mensaje a enviar.\n//\n// Sirve a dos canales. En EE.UU. el canal es SMS y manda la TCPA: consentimiento\n// previo por escrito, horario restringido y opt-out honrado. En México el canal\n// es WhatsApp y manda la política de Meta. Las reglas duras de abajo son la\n// intersección de ambas, aplicadas siempre.\n// ---------------------------------------------------------------------------\nconst cfg      = $('Config').first().json;\nconst negocios = $('Leer negocios').all().map(i => i.json);\nconst clientes = $('Leer clientes').all().map(i => i.json);\nconst log      = $('Leer log').all().map(i => i.json);\nconst tarifas  = $('Leer tarifas').all().map(i => i.json);\n\nconst ahora = new Date();\nconst DIA   = 86400000;\n\nconst esSi = v => String(v ?? '').trim().toLowerCase() === 'si';\nconst soloDigitos = t => String(t ?? '').replace(/[^0-9]/g, '');\n\n// --- Reloj local del negocio -----------------------------------------------\n// Todo se calcula en la zona horaria de la barbería, no en la del servidor.\n// Un cron a las 10:00 UTC son las 4 de la mañana en Texas, y eso es una\n// violación de horario, no un detalle.\nfunction enZona(tz, opts, respaldo) {\n  try { return new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts }).format(ahora); }\n  catch (e) { return respaldo; }\n}\nconst horaLocal = tz => {\n  const h = parseInt(enZona(tz, { hour: '2-digit', hourCycle: 'h23' }, String(ahora.getUTCHours())), 10);\n  return Number.isFinite(h) ? h : ahora.getUTCHours();\n};\nconst DOW = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };\nconst diaLocal = tz => DOW[enZona(tz, { weekday: 'short' }, '')] ?? (((ahora.getUTCDay() + 6) % 7) + 1);\nconst fechaLocal = tz => {\n  const f = enZona(tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, '');\n  const m = f.match(/(\\d{2})\\/(\\d{2})\\/(\\d{4})/);\n  return m ? `${m[3]}-${m[1]}-${m[2]}` : ahora.toISOString().slice(0, 10);\n};\n\nconst diasEntre = (desde, hoy) => {\n  const s = String(desde ?? '').trim().slice(0, 10);\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return null;\n  const t = Date.parse(s + 'T00:00:00Z');\n  if (Number.isNaN(t)) return null;\n  return Math.floor((Date.parse(hoy + 'T00:00:00Z') - t) / DIA);\n};\n\nconst precio = (pais, canal, categoria) => {\n  const t = tarifas.find(x =>\n    String(x.pais).trim() === String(pais).trim() &&\n    String(x.canal).trim() === String(canal).trim() &&\n    String(x.categoria).trim() === String(categoria).trim());\n  return t ? (Number(t.precio_usd) || 0) : 0;\n};\n\n// --- Segmentos SMS ----------------------------------------------------------\n// Un SMS no se cobra por mensaje, se cobra por segmento, y el número de\n// segmentos depende de la codificación. Si UN solo carácter se sale de GSM-7\n// —una tilde, un emoji— el mensaje ENTERO pasa a UCS-2 y la capacidad cae de\n// 160 a 70 caracteres. Una \"ó\" puede triplicar la factura.\nconst GSM7 = '@£$¥èéùìòÇ\\nØø\\rÅå'\n  + 'Δ_ΦΓΛΩΠΨΣΘΞÆæßÉ'\n  + ' !\"#¤%&\\'()*+,-./0123456789:;<=>?¡'\n  + 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿'\n  + 'abcdefghijklmnopqrstuvwxyzäöñüà';\nconst GSM7_EXT = '^{}\\\\[~]|€';\n\nfunction medirSms(texto) {\n  const t = String(texto ?? '');\n  let esGsm = true, largo = 0, culpable = '';\n  for (const c of t) {\n    if (GSM7.indexOf(c) !== -1) largo += 1;\n    else if (GSM7_EXT.indexOf(c) !== -1) largo += 2;   // los de extensión ocupan 2\n    else { esGsm = false; culpable = c; break; }\n  }\n  if (!esGsm) {\n    // UCS-2 cuenta unidades UTF-16: un emoji fuera del plano básico ocupa 2.\n    largo = [...t].reduce((n, c) => n + (c.codePointAt(0) > 0xFFFF ? 2 : 1), 0);\n    return { encoding: 'UCS-2', caracteres: largo,\n             segmentos: largo <= 70 ? 1 : Math.ceil(largo / 67), culpable };\n  }\n  return { encoding: 'GSM-7', caracteres: largo,\n           segmentos: largo <= 160 ? 1 : Math.ceil(largo / 153), culpable: '' };\n}\n\nconst rellenar = (plantilla, vals) =>\n  String(plantilla ?? '').replace(/\\{(\\w+)\\}/g, (m, k) => (vals[k] ?? m));\n\n// Twilio recibe el cuerpo como formulario, no como JSON.\nconst formulario = o => Object.entries(o)\n  .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');\n\n// --- Último contacto real, reconstruido desde el log ------------------------\nconst ultimoContacto = {};\nfor (const l of log) {\n  if (String(l.tipo).trim() !== 'reactivacion') continue;\n  const k = String(l.cliente_id ?? '').trim();\n  const f = String(l.timestamp ?? '').slice(0, 10);\n  if (!k || !f) continue;\n  if (!ultimoContacto[k] || f > ultimoContacto[k]) ultimoContacto[k] = f;\n}\n\nconst dryRun = esSi(cfg.modo_prueba) || cfg.modo_prueba === true;\nconst salida = [];\nconst descartes = {};\nconst resumenNegocios = [];\n\nfor (const n of negocios) {\n  const id = String(n.negocio_id ?? '').trim();\n  if (!id) continue;\n\n  const omitir = m => resumenNegocios.push({ negocio_id: id, omitido: m });\n  if (!esSi(n.activo)) { omitir('inactivo'); continue; }\n\n  const canal = String(n.canal ?? 'sms').trim().toLowerCase();\n  const tz    = String(n.zona_horaria ?? 'America/Chicago').trim();\n  const hoy   = fechaLocal(tz);\n\n  // Horario. La TCPA permite 8:00-21:00 hora local del destinatario; aquí se\n  // usa 9:00-20:00, más estrecho a propósito: el margen cubre el desfase entre\n  // la zona del local y la del cliente, y de paso nadie recibe publicidad\n  // mientras cena.\n  const hora = horaLocal(tz);\n  if (hora < 9 || hora >= 20) { omitir('fuera_de_horario_local_' + hora + 'h'); continue; }\n\n  const habiles = String(n.dias_habiles ?? '').split(',').map(s => s.trim()).filter(Boolean);\n  if (habiles.length && !habiles.includes(String(diaLocal(tz)))) { omitir('hoy_no_abre'); continue; }\n\n  if (canal === 'sms' && !String(n.sms_remitente ?? '').trim()) { omitir('sin_remitente_sms'); continue; }\n  if (canal === 'whatsapp' && !String(n.phone_number_id ?? '').trim()) { omitir('sin_phone_number_id'); continue; }\n\n  const umbral    = Number(n.umbral_dias)     || 45;\n  const umbralMax = Number(n.umbral_max_dias) || 120;\n  const cooldown  = Number(n.cooldown_dias)   || 60;\n  const tope      = Number(n.max_por_dia)     || 40;\n\n  const marcar = m => { descartes[m] = (descartes[m] || 0) + 1; };\n  const candidatos = [];\n\n  for (const c of clientes) {\n    if (String(c.negocio_id ?? '').trim() !== id) continue;\n\n    // Consentimiento previo. En EE.UU. no es buena práctica, es la diferencia\n    // entre una campaña y una demanda de 500 a 1.500 USD por mensaje.\n    if (!esSi(c.consentimiento)) { marcar('sin_consentimiento'); continue; }\n    if (esSi(c.optout))          { marcar('optout'); continue; }\n\n    const telefono = soloDigitos(c.telefono);\n    if (telefono.length < 10) { marcar('telefono_invalido'); continue; }\n\n    const dormido = diasEntre(c.ultima_visita, hoy);\n    if (dormido === null)    { marcar('sin_ultima_visita'); continue; }\n    if (dormido < umbral)    { marcar('aun_activo'); continue; }\n    if (dormido > umbralMax) { marcar('demasiado_frio'); continue; }\n\n    const prox = diasEntre(c.proxima_cita, hoy);\n    if (prox !== null && prox <= 0) { marcar('ya_tiene_cita'); continue; }\n\n    const desdeContacto = diasEntre(ultimoContacto[String(c.cliente_id).trim()] ?? c.ultimo_contacto, hoy);\n    if (desdeContacto !== null && desdeContacto < cooldown) { marcar('en_cooldown'); continue; }\n\n    candidatos.push({ cliente: c, telefono, dormido });\n  }\n\n  // Primero los que llevan menos tiempo dormidos: son los más recuperables.\n  candidatos.sort((a, b) => a.dormido - b.dormido);\n  const elegidos = candidatos.slice(0, tope);\n\n  let costoNegocio = 0;\n  let segmentosNegocio = 0;\n\n  for (const cand of elegidos) {\n    const c = cand.cliente;\n    const nombre = (String(c.nombre ?? '').trim().split(/\\s+/)[0]) || 'hola';\n    const negocioNombre = String(n.nombre_corto || n.nombre || '').trim();\n    const servicio = String(c.servicio_habitual || '').trim() || 'tu corte de siempre';\n\n    const comun = {\n      negocio_id: id,\n      negocio_nombre: negocioNombre,\n      canal,\n      zona_horaria: tz,\n      cliente_id: String(c.cliente_id ?? '').trim(),\n      nombre,\n      nombre_completo: String(c.nombre ?? '').trim(),\n      telefono: cand.telefono,\n      servicio,\n      dias_dormido: cand.dormido,\n      envio_real: !dryRun,\n      telefono_dueno: soloDigitos(n.telefono_dueno),\n    };\n\n    if (canal === 'sms') {\n      const texto = rellenar(n.sms_plantilla, {\n        nombre, negocio: negocioNombre, servicio,\n        nombre_completo: comun.nombre_completo, telefono: cand.telefono,\n      });\n      const m = medirSms(texto);\n      const unit = precio(n.pais, 'sms', 'segmento');\n      const costo = Number((m.segmentos * unit).toFixed(5));\n      costoNegocio += costo;\n      segmentosNegocio += m.segmentos;\n\n      const remitente = String(n.sms_remitente).trim();\n      salida.push({ json: { ...comun,\n        categoria: 'segmento',\n        plantilla: 'sms_plantilla',\n        sms_texto: texto,\n        encoding: m.encoding,\n        segmentos: m.segmentos,\n        caracteres: m.caracteres,\n        // Se avisa cuando un carácter suelto disparó el costo.\n        aviso_encoding: m.culpable\n          ? `\"${m.culpable}\" saca el mensaje de GSM-7: ${m.segmentos} segmentos en vez de 1`\n          : '',\n        costo_estimado_usd: costo,\n        sms_form: formulario({\n          To: '+' + cand.telefono,\n          Body: texto,\n          ...(remitente.startsWith('MG') ? { MessagingServiceSid: remitente } : { From: remitente }),\n        }),\n        payload: null,\n      }});\n    } else {\n      const unit = precio(n.pais, 'whatsapp', 'marketing');\n      costoNegocio += unit;\n      salida.push({ json: { ...comun,\n        categoria: 'marketing',\n        plantilla: String(n.plantilla_reactivacion || '').trim(),\n        encoding: '',\n        segmentos: '',\n        caracteres: '',\n        aviso_encoding: '',\n        costo_estimado_usd: unit,\n        sms_texto: '',\n        sms_form: '',\n        phone_number_id: String(n.phone_number_id).trim(),\n        payload: {\n          messaging_product: 'whatsapp',\n          recipient_type: 'individual',\n          to: cand.telefono,\n          type: 'template',\n          template: {\n            name: String(n.plantilla_reactivacion || '').trim(),\n            language: { code: String(n.idioma_plantilla || 'es_MX').trim() },\n            components: [\n              { type: 'body', parameters: [\n                { type: 'text', text: nombre },\n                { type: 'text', text: negocioNombre },\n                { type: 'text', text: servicio },\n              ]},\n              { type: 'button', sub_type: 'quick_reply', index: '0',\n                parameters: [{ type: 'payload', payload: 'AGENDAR' }] },\n              { type: 'button', sub_type: 'quick_reply', index: '1',\n                parameters: [{ type: 'payload', payload: 'AHORA_NO' }] },\n              { type: 'button', sub_type: 'quick_reply', index: '2',\n                parameters: [{ type: 'payload', payload: 'BAJA' }] },\n            ],\n          },\n        },\n      }});\n    }\n  }\n\n  resumenNegocios.push({\n    negocio_id: id,\n    canal,\n    hora_local: hora,\n    candidatos: candidatos.length,\n    elegidos: elegidos.length,\n    frenados_por_tope: Math.max(0, candidatos.length - elegidos.length),\n    segmentos: segmentosNegocio || undefined,\n    costo_estimado_usd: Number(costoNegocio.toFixed(4)),\n  });\n}\n\n// Lo primero que se mira cuando alguien pregunta \"¿por qué hoy solo salieron 3?\".\nconsole.log('modo_prueba=' + dryRun);\nconsole.log('por_negocio=' + JSON.stringify(resumenNegocios));\nconsole.log('descartes=' + JSON.stringify(descartes));\nconst avisos = salida.filter(s => s.json.aviso_encoding).map(s => s.json.aviso_encoding);\nif (avisos.length) console.log('AVISO_COSTO=' + JSON.stringify([...new Set(avisos)]));\n\nreturn salida;"
+      },
+      "id": "w152388160",
+      "name": "Seleccionar dormidos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.telefono }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w175362355",
+      "name": "¿Hay a quién escribir?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "w152262190",
+      "name": "Nada que enviar hoy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": "={{ $('Config').first().json.tam_lote }}",
+        "options": {}
+      },
+      "id": "w130178358",
+      "name": "Lote de envío",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1140,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.envio_real }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w131033593",
+      "name": "¿Envío real?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.canal }}",
+              "rightValue": "sms",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w133824745",
+      "name": "¿Canal SMS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1580,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.twilio.com/2010-04-01/Accounts/{{ $('Config').first().json.twilio_account_sid }}/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "body": "={{ $json.sms_form }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "w114295038",
+      "name": "Enviar SMS (Twilio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Traduce la respuesta de Twilio a una fila de log. Una vez por item.\nconst origen = $('Lote de envío').item.json;\nconst res    = $json;\nconst cuerpo = res.body ?? res;\nconst status = Number(res.statusCode ?? 200);\n\nconst sid     = cuerpo?.sid ?? '';\nconst errNodo = res.error ?? null;\n// Twilio devuelve el error en el propio cuerpo, con su código numérico.\nconst codApi  = cuerpo?.code ?? null;\n\nlet estado = 'enviado', codigo = '', mensaje = '';\nif (errNodo)            { estado = 'error'; codigo = String(errNodo.code ?? 'nodo'); mensaje = String(errNodo.message ?? errNodo); }\nelse if (codApi)        { estado = 'error'; codigo = String(codApi); mensaje = String(cuerpo.message ?? ''); }\nelse if (status >= 400) { estado = 'error'; codigo = String(status); mensaje = JSON.stringify(cuerpo); }\nelse if (!sid)          { estado = 'error'; codigo = 'sin_sid'; mensaje = JSON.stringify(cuerpo); }\n\n// Twilio acepta el mensaje como 'queued'; que llegue se sabe después, por el\n// webhook de estado. Un 201 aquí significa aceptado, no entregado.\nconst CATALOGO = {\n  '20003': ['Credenciales de Twilio inválidas.', 'avisar_operador'],\n  '20429': ['Demasiadas peticiones a la API de Twilio.', 'reintentar_manana'],\n  '21211': ['El número de destino no tiene formato válido E.164.', 'descartar_numero'],\n  '21214': ['El número de destino no es alcanzable.', 'descartar_numero'],\n  '21408': ['La cuenta no tiene permiso para enviar a esa región.', 'avisar_operador'],\n  '21606': ['El remitente no es un número de Twilio con SMS habilitado.', 'avisar_operador'],\n  '21610': ['El cliente hizo opt-out en el operador. Márcalo en la hoja.', 'descartar_numero'],\n  '21614': ['El número de destino no es móvil: no puede recibir SMS.', 'descartar_numero'],\n  '30003': ['Teléfono apagado o fuera de cobertura.', 'reintentar_manana'],\n  '30005': ['El número no existe o fue dado de baja.', 'descartar_numero'],\n  '30006': ['Es una línea fija o el operador no acepta SMS.', 'descartar_numero'],\n  '30007': ['El operador filtró el mensaje como spam. Revisa el texto y el volumen.', 'avisar_operador'],\n  '30034': ['El número no está registrado en A2P 10DLC. Los operadores bloquean todo.', 'avisar_operador'],\n  '30032': ['Tipo de mensaje no permitido para este remitente.', 'avisar_operador'],\n};\n\nlet diagnostico = '', accion = 'ninguna';\nif (estado === 'error') {\n  const hit = CATALOGO[codigo];\n  diagnostico = hit ? hit[0] : ('Error no catalogado: ' + mensaje).slice(0, 200);\n  accion      = hit ? hit[1] : 'avisar_operador';\n}\n\nreturn { json: {\n  timestamp: new Date().toISOString(),\n  negocio_id: origen.negocio_id, cliente_id: origen.cliente_id, telefono: origen.telefono,\n  canal: 'sms', tipo: 'reactivacion', categoria: origen.categoria, plantilla: origen.plantilla,\n  encoding: origen.encoding, segmentos: origen.segmentos,\n  wamid: sid, estado, error_code: codigo, error_mensaje: mensaje.slice(0, 300),\n  costo_estimado_usd: estado === 'enviado' ? origen.costo_estimado_usd : 0,\n  facturable: '', respondio: 'no', agendo: 'no', dias_dormido: origen.dias_dormido,\n  diagnostico: diagnostico || origen.aviso_encoding, accion,\n}};"
+      },
+      "id": "w166144733",
+      "name": "Clasificar SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.graph_version }}/{{ $json.phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "w177301605",
+      "name": "Enviar plantilla (WhatsApp)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        460
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Traduce la respuesta de la WhatsApp Cloud API a una fila de log. Una vez por item.\nconst origen = $('Lote de envío').item.json;\nconst res    = $json;\nconst cuerpo = res.body ?? res;\nconst status = Number(res.statusCode ?? 200);\n\nconst id     = cuerpo?.messages?.[0]?.id ?? '';\nconst errApi = cuerpo?.error ?? null;\nconst errNodo = res.error ?? null;\n\nlet estado = 'enviado', codigo = '', mensaje = '';\nif (errNodo)          { estado = 'error'; codigo = String(errNodo.code ?? 'nodo'); mensaje = String(errNodo.message ?? errNodo); }\nelse if (errApi)      { estado = 'error'; codigo = String(errApi.code ?? status); mensaje = String(errApi.error_data?.details ?? errApi.message ?? ''); }\nelse if (status >= 400) { estado = 'error'; codigo = String(status); mensaje = JSON.stringify(cuerpo); }\nelse if (!id)         { estado = 'error'; codigo = 'sin_wamid'; mensaje = JSON.stringify(cuerpo); }\n\nconst CATALOGO = {\n  '4':      ['Límite de peticiones de la app alcanzado.', 'reintentar_manana'],\n  '80007':  ['Límite de peticiones de la app alcanzado.', 'reintentar_manana'],\n  '130429': ['Límite de mensajes por segundo alcanzado.', 'reintentar_manana'],\n  '131048': ['Límite de calidad del número: Meta frenó el envío.', 'avisar_operador'],\n  '131049': ['Meta no entregó el mensaje por sus límites de marketing por usuario.', 'reintentar_manana'],\n  '130472': ['El usuario está en un experimento de Meta y no recibe marketing.', 'reintentar_manana'],\n  '131026': ['El número no puede recibir mensajes (probablemente no tiene WhatsApp).', 'descartar_numero'],\n  '131047': ['Fuera de la ventana de 24h y el mensaje no era plantilla.', 'avisar_operador'],\n  '133010': ['El número del negocio no está registrado en la Cloud API.', 'avisar_operador'],\n  '190':    ['El token de acceso caducó o fue revocado.', 'avisar_operador'],\n  '132000': ['La plantilla existe pero el número de parámetros no coincide.', 'avisar_operador'],\n  '132001': ['La plantilla no existe o no está aprobada en ese idioma.', 'avisar_operador'],\n  '132007': ['El formato de la plantilla viola las políticas de WhatsApp.', 'avisar_operador'],\n  '132012': ['Un parámetro de la plantilla tiene formato inválido.', 'avisar_operador'],\n  '132015': ['La plantilla está pausada por baja calidad.', 'avisar_operador'],\n  '132016': ['La plantilla fue deshabilitada definitivamente por calidad.', 'avisar_operador'],\n};\n\nlet diagnostico = '', accion = 'ninguna';\nif (estado === 'error') {\n  const hit = CATALOGO[codigo];\n  diagnostico = hit ? hit[0] : ('Error no catalogado: ' + mensaje).slice(0, 200);\n  accion      = hit ? hit[1] : 'avisar_operador';\n}\n\nreturn { json: {\n  timestamp: new Date().toISOString(),\n  negocio_id: origen.negocio_id, cliente_id: origen.cliente_id, telefono: origen.telefono,\n  canal: 'whatsapp', tipo: 'reactivacion', categoria: origen.categoria, plantilla: origen.plantilla,\n  encoding: '', segmentos: '',\n  wamid: id, estado, error_code: codigo, error_mensaje: mensaje.slice(0, 300),\n  costo_estimado_usd: estado === 'enviado' ? origen.costo_estimado_usd : 0,\n  facturable: '', respondio: 'no', agendo: 'no', dias_dormido: origen.dias_dormido,\n  diagnostico, accion,\n}};"
+      },
+      "id": "w110361850",
+      "name": "Clasificar WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Modo prueba: misma fila de log que el envío real, sin tocar ninguna API.\n// Sirve para validar la selección y el costo con datos reales antes de gastar.\nconst o = $json;\nreturn { json: {\n  timestamp: new Date().toISOString(),\n  negocio_id: o.negocio_id, cliente_id: o.cliente_id, telefono: o.telefono,\n  canal: o.canal, tipo: 'reactivacion', categoria: o.categoria, plantilla: o.plantilla,\n  encoding: o.encoding, segmentos: o.segmentos,\n  wamid: '', estado: 'simulado', error_code: '', error_mensaje: '',\n  costo_estimado_usd: 0, facturable: '', respondio: 'no', agendo: 'no',\n  dias_dormido: o.dias_dormido,\n  diagnostico: 'MODO PRUEBA: no se envió. Habría costado ' + o.costo_estimado_usd + ' USD.'\n    + (o.aviso_encoding ? ' | ' + o.aviso_encoding : ''),\n  accion: 'ninguna',\n}};"
+      },
+      "id": "w152802269",
+      "name": "Simular envío",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "log_mensajes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "w185738203",
+      "name": "Registrar en log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2240,
+        460
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "clientes",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cliente_id": "={{ $json.cliente_id }}",
+            "ultimo_contacto": "={{ ($json.timestamp || $now.toISO()).slice(0,10) }}",
+            "estado": "={{ $json.estado === 'enviado' ? 'contactado' : $json.estado === 'simulado' ? 'dormido' : 'error_envio' }}"
+          },
+          "matchingColumns": [
+            "cliente_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "w16525394",
+      "name": "Marcar contactado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2460,
+        460
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Config').first().json.espera_entre_lotes_seg }}",
+        "unit": "seconds"
+      },
+      "id": "w19387310",
+      "name": "Espera entre lotes",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2680,
+        460
+      ],
+      "webhookId": "espera-entre-lotes-reactivacion"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Agrupa lo enviado hoy por negocio: una fila de resumen para el operador y,\n// si hubo envíos, un aviso al dueño. Ese aviso es lo que evita la cancelación\n// a los tres meses: un servicio que no se ve, se cancela.\nconst filas    = $input.all().map(i => i.json).filter(f => f && f.negocio_id);\nconst negocios = $('Leer negocios').all().map(i => i.json);\n\nconst soloDigitos = t => String(t ?? '').replace(/[^0-9]/g, '');\nconst rellenar = (p, v) => String(p ?? '').replace(/\\{(\\w+)\\}/g, (m, k) => (v[k] ?? m));\nconst formulario = o => Object.entries(o)\n  .map(([k, x]) => encodeURIComponent(k) + '=' + encodeURIComponent(x)).join('&');\n\nconst porNegocio = {};\nfor (const f of filas) {\n  const k = String(f.negocio_id);\n  porNegocio[k] ??= { enviados: 0, errores: 0, simulados: 0, segmentos: 0, costo: 0, incidencias: [] };\n  const g = porNegocio[k];\n  if (f.estado === 'enviado')       g.enviados++;\n  else if (f.estado === 'simulado') g.simulados++;\n  else {\n    g.errores++;\n    if (f.accion === 'avisar_operador' && f.diagnostico) g.incidencias.push(f.error_code + ': ' + f.diagnostico);\n  }\n  g.segmentos += Number(f.segmentos) || 0;\n  g.costo += Number(f.costo_estimado_usd) || 0;\n}\n\nconst salida = [];\nfor (const [id, g] of Object.entries(porNegocio)) {\n  const n = negocios.find(x => String(x.negocio_id).trim() === id) || {};\n  const canal = String(n.canal ?? 'sms').trim().toLowerCase();\n  const incidencias = [...new Set(g.incidencias)];\n  const telDueno = soloDigitos(n.telefono_dueno);\n  const negocioCorto = String(n.nombre_corto || n.nombre || '').trim();\n\n  const plantillaOk = canal === 'sms'\n    ? !!String(n.sms_resumen || '').trim()\n    : !!String(n.plantilla_resumen || '').trim();\n  const avisar = g.enviados > 0 && !!telDueno && plantillaOk;\n\n  let smsForm = '', payload = null;\n  if (avisar && canal === 'sms') {\n    const remitente = String(n.sms_remitente || '').trim();\n    smsForm = formulario({\n      To: '+' + telDueno,\n      Body: rellenar(n.sms_resumen, { negocio: negocioCorto, enviados: String(g.enviados) }),\n      ...(remitente.startsWith('MG') ? { MessagingServiceSid: remitente } : { From: remitente }),\n    });\n  } else if (avisar) {\n    payload = {\n      messaging_product: 'whatsapp', recipient_type: 'individual', to: telDueno, type: 'template',\n      template: {\n        name: String(n.plantilla_resumen).trim(),\n        language: { code: String(n.idioma_plantilla || 'es_MX').trim() },\n        components: [{ type: 'body', parameters: [\n          { type: 'text', text: negocioCorto },\n          { type: 'text', text: String(g.enviados) },\n        ]}],\n      },\n    };\n  }\n\n  salida.push({ json: {\n    timestamp: new Date().toISOString(),\n    fecha: new Date().toISOString().slice(0, 10),\n    negocio_id: id, canal,\n    enviados: g.enviados, errores: g.errores, simulados: g.simulados,\n    segmentos: g.segmentos,\n    costo_estimado_usd: Number(g.costo.toFixed(4)),\n    incidencias: incidencias.join(' | '),\n    requiere_atencion: incidencias.length ? 'si' : 'no',\n    avisar_dueno: avisar,\n    es_sms: canal === 'sms',\n    phone_number_id: String(n.phone_number_id || '').trim(),\n    sms_form: smsForm,\n    payload_resumen: payload,\n  }});\n}\n\nreturn salida;"
+      },
+      "id": "w183863393",
+      "name": "Resumen por negocio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "resumen_diario",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "fecha": "={{ $json.fecha }}",
+            "negocio_id": "={{ $json.negocio_id }}",
+            "canal": "={{ $json.canal }}",
+            "enviados": "={{ $json.enviados }}",
+            "errores": "={{ $json.errores }}",
+            "simulados": "={{ $json.simulados }}",
+            "segmentos": "={{ $json.segmentos }}",
+            "costo_estimado_usd": "={{ $json.costo_estimado_usd }}",
+            "incidencias": "={{ $json.incidencias }}",
+            "requiere_atencion": "={{ $json.requiere_atencion }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "w148393653",
+      "name": "Registrar resumen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1580,
+        160
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.avisar_dueno }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w129488190",
+      "name": "¿Avisar al dueño?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.es_sms }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "w172429293",
+      "name": "¿Resumen por SMS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2020,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.twilio.com/2010-04-01/Accounts/{{ $('Config').first().json.twilio_account_sid }}/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "body": "={{ $json.sms_form }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "w150948152",
+      "name": "Resumen SMS al dueño",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        40
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $('Config').first().json.graph_version }}/{{ $json.phone_number_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload_resumen) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "w14722591",
+      "name": "Resumen WhatsApp al dueño",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "w168545139",
+      "name": "Fin",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2460,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Cron diario": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Leer negocios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer negocios": {
+      "main": [
+        [
+          {
+            "node": "Leer clientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer clientes": {
+      "main": [
+        [
+          {
+            "node": "Leer log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer log": {
+      "main": [
+        [
+          {
+            "node": "Leer tarifas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer tarifas": {
+      "main": [
+        [
+          {
+            "node": "Seleccionar dormidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seleccionar dormidos": {
+      "main": [
+        [
+          {
+            "node": "¿Hay a quién escribir?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay a quién escribir?": {
+      "main": [
+        [
+          {
+            "node": "Lote de envío",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nada que enviar hoy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lote de envío": {
+      "main": [
+        [
+          {
+            "node": "Resumen por negocio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Envío real?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Envío real?": {
+      "main": [
+        [
+          {
+            "node": "¿Canal SMS?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Simular envío",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Canal SMS?": {
+      "main": [
+        [
+          {
+            "node": "Enviar SMS (Twilio)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar plantilla (WhatsApp)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar SMS (Twilio)": {
+      "main": [
+        [
+          {
+            "node": "Clasificar SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar plantilla (WhatsApp)": {
+      "main": [
+        [
+          {
+            "node": "Clasificar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar SMS": {
+      "main": [
+        [
+          {
+            "node": "Registrar en log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Registrar en log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simular envío": {
+      "main": [
+        [
+          {
+            "node": "Registrar en log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar en log": {
+      "main": [
+        [
+          {
+            "node": "Marcar contactado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar contactado": {
+      "main": [
+        [
+          {
+            "node": "Espera entre lotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera entre lotes": {
+      "main": [
+        [
+          {
+            "node": "Lote de envío",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumen por negocio": {
+      "main": [
+        [
+          {
+            "node": "Registrar resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar resumen": {
+      "main": [
+        [
+          {
+            "node": "¿Avisar al dueño?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Avisar al dueño?": {
+      "main": [
+        [
+          {
+            "node": "¿Resumen por SMS?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Resumen por SMS?": {
+      "main": [
+        [
+          {
+            "node": "Resumen SMS al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumen WhatsApp al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumen SMS al dueño": {
+      "main": [
+        [
+          {
+            "node": "Fin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resumen WhatsApp al dueño": {
+      "main": [
+        [
+          {
+            "node": "Fin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "America/Chicago"
+  },
+  "pinData": {},
+  "tags": []
+}

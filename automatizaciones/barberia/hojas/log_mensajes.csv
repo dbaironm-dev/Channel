@@ -1,0 +1,3 @@
+timestamp,negocio_id,cliente_id,telefono,canal,tipo,categoria,plantilla,encoding,segmentos,wamid,estado,error_code,error_mensaje,costo_estimado_usd,facturable,respondio,agendo,dias_dormido,diagnostico,accion
+2026-03-10T15:00:12.000Z,brb001,c001,12145550001,sms,reactivacion,segmento,sms_plantilla,GSM-7,1,SMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,entregado,,,0.0109,si,no,no,52,,ninguna
+2026-03-10T15:00:34.000Z,brb001,c004,12145550004,sms,reactivacion,segmento,sms_plantilla,GSM-7,1,,error,21610,Attempt to send to unsubscribed recipient,0,,no,no,47,El cliente hizo opt-out en el operador. Marcalo en la hoja.,descartar_numero

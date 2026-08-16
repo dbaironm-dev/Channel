@@ -1,0 +1,234 @@
+{
+  "name": "Barbería · 03 Manejador de errores",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e19440352",
+      "name": "Fallo en cualquier workflow",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "sheet_id",
+              "value": "REEMPLAZA_CON_EL_ID_DE_TU_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "chat_id_operador",
+              "value": "REEMPLAZA_CON_TU_CHAT_ID_DE_TELEGRAM",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e305174497",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------------\n// Normaliza lo que entrega el Error Trigger. Cambia de forma según si el fallo\n// ocurrió dentro de una ejecución o al disparar el trigger, así que leemos\n// ambas variantes en vez de asumir una.\n// ---------------------------------------------------------------------------\nconst d = $json ?? {};\nconst eje = d.execution ?? d.trigger ?? {};\nconst wf  = d.workflow ?? {};\n\nconst mensaje = String(\n  eje.error?.message ?? d.error?.message ?? eje.error ?? 'Error sin mensaje'\n).slice(0, 500);\n\nconst nodo = String(eje.lastNodeExecuted ?? eje.error?.node?.name ?? 'desconocido');\n\n// Fallos que no son culpa del workflow y no hay que perseguir a las 3 de la\n// mañana: se reintentan solos en la siguiente corrida.\nconst TRANSITORIO = /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|too many requests|rate.?limit|503|502|504/i;\nconst esTransitorio = TRANSITORIO.test(mensaje);\n\n// Fallos que dejan el servicio muerto hasta que un humano actúe.\nconst CRITICO = /token|credential|unauthorized|401|403|invalid.?grant|quota/i;\nconst esCritico = CRITICO.test(mensaje);\n\nconst gravedad = esCritico ? 'critico' : esTransitorio ? 'transitorio' : 'revisar';\n\nconst ICONO = { critico: '🔴', revisar: '🟠', transitorio: '🟡' };\nconst NOTA = {\n  critico: 'Servicio caído hasta que alguien lo arregle. Revisa credenciales o token de Meta.',\n  revisar: 'Fallo no clasificado. Abre la ejecución y mira qué pasó.',\n  transitorio: 'Problema de red o límite de peticiones. Se reintenta solo en la próxima corrida.',\n};\n\nreturn { json: {\n  timestamp: new Date().toISOString(),\n  workflow: String(wf.name ?? 'desconocido'),\n  nodo,\n  ejecucion_id: String(eje.id ?? ''),\n  mensaje,\n  url_ejecucion: String(eje.url ?? ''),\n  gravedad,\n  // Los transitorios se registran pero no despiertan a nadie.\n  notificar: gravedad !== 'transitorio',\n  texto_alerta: [\n    ICONO[gravedad] + ' Fallo en «' + String(wf.name ?? '?') + '»',\n    'Nodo: ' + nodo,\n    'Error: ' + mensaje,\n    NOTA[gravedad],\n    eje.url ? 'Ejecución: ' + eje.url : '',\n  ].filter(Boolean).join('\\n'),\n}};"
+      },
+      "id": "e434528020",
+      "name": "Clasificar fallo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errores",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "workflow": "={{ $json.workflow }}",
+            "nodo": "={{ $json.nodo }}",
+            "ejecucion_id": "={{ $json.ejecucion_id }}",
+            "mensaje": "={{ $json.mensaje }}",
+            "url_ejecucion": "={{ $json.url_ejecucion }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "e638678890",
+      "name": "Registrar error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        300,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Clasificar fallo').item.json.notificar }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e546289796",
+      "name": "¿Merece despertar a alguien?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Config').first().json.chat_id_operador }}",
+        "text": "={{ $('Clasificar fallo').item.json.texto_alerta }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "e901049589",
+      "name": "Avisar al operador",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        740,
+        220
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "e688804600",
+      "name": "Solo registrado",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        740,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Fallo en cualquier workflow": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Clasificar fallo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar fallo": {
+      "main": [
+        [
+          {
+            "node": "Registrar error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar error": {
+      "main": [
+        [
+          {
+            "node": "¿Merece despertar a alguien?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Merece despertar a alguien?": {
+      "main": [
+        [
+          {
+            "node": "Avisar al operador",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Solo registrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "America/Mexico_City"
+  },
+  "pinData": {},
+  "tags": []
+}
